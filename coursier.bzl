@@ -759,6 +759,17 @@ def make_coursier_dep_tree(
         _is_verbose(repository_ctx),
     )
 
+def _filter_list_by_allowlist(original, allowlist, unversioned_allow_list):
+    new_list = []
+    for item in original:
+        if item in allowlist:
+            new_list.append(item)
+        else:
+            for unversioned_allowed_coord in unversioned_allow_list:
+                if item.startswith(unversioned_allowed_coord):
+                    new_list.append(item)
+    return new_list
+
 def remove_prefix(s, prefix):
     if s.startswith(prefix):
         return s[len(prefix):]
@@ -868,14 +879,35 @@ def _coursier_fetch_impl(repository_ctx):
     jetify_include_dict = {k: None for k in repository_ctx.attr.jetify_include_list}
     jetify_all = repository_ctx.attr.jetify and repository_ctx.attr.jetify_include_list == JETIFY_INCLUDE_LIST_JETIFY_ALL
 
-    for artifact in dep_tree["dependencies"]:
+    specified_artifacts = {}
+    for a in artifacts:
+        a_coord = utils.artifact_coordinate(a)
+        classifier = (":%s" % a["classifier"] if a.get("classifier") != None else "")
+        packaging = (":%s" % a["packaging"] if a.get("packaging") != None else "")
+        a_coord = a["group"] + ":" + a["artifact"] + packaging + classifier + ":" + a["version"]
+        a_coord_unversioned = ":".join(a_coord.split(":")[:-1])
+        specified_artifacts[a_coord] = True
+
+    # we want to allow any version of the overriden artifacts:
+    specified_unversioned_artifacts = [overriden_unversioned_coord + ":" for overriden_unversioned_coord in repository_ctx.attr.override_targets]
+
+    block_list = []
+    for artifact_position, artifact in enumerate(dep_tree["dependencies"]):
         # Some artifacts don't contain files; they are just parent artifacts
         # to other artifacts.
         if artifact["file"] == None:
             continue
 
-        coord_split = artifact["coord"].split(":")
-        coord_unversioned = "{}:{}".format(coord_split[0], coord_split[1])
+        coord = artifact["coord"]
+        coord_split = coord.split(":")
+        coord_unversioned = ":".join(coord_split[:-1])
+
+        if repository_ctx.attr.allowlist_mode:
+            if not (coord in specified_artifacts or coord_unversioned in specified_unversioned_artifacts):
+                block_list.insert(0, artifact_position)
+            artifact["dependencies"] = _filter_list_by_allowlist(artifact["dependencies"], specified_artifacts, specified_unversioned_artifacts)
+            artifact["directDependencies"] = _filter_list_by_allowlist(artifact["directDependencies"], specified_artifacts, specified_unversioned_artifacts)
+
         should_jetify = jetify_all or (repository_ctx.attr.jetify and coord_unversioned in jetify_include_dict)
         if should_jetify:
             artifact["directDependencies"] = jetify_artifact_dependencies(artifact["directDependencies"])
@@ -974,6 +1006,9 @@ def _coursier_fetch_impl(repository_ctx):
         artifact.update({"mirror_urls": mirror_urls})
 
         files_to_inspect.append(repository_ctx.path(artifact["file"]))
+
+    for coord_to_block in block_list:
+        dep_tree["dependencies"].pop(coord_to_block)
 
     hasher_stdout = _execute_with_argsfile(
         repository_ctx,
@@ -1204,6 +1239,7 @@ pinned_coursier_fetch = repository_rule(
                 "none",
             ],
         ),
+        "allowlist_mode": attr.bool(doc = "Only download dependencies (including transitive) that were explicitly declared via `artifacts` parameter"),
     },
     implementation = _pinned_coursier_fetch_impl,
 )
@@ -1266,6 +1302,7 @@ coursier_fetch = repository_rule(
                 "none",
             ],
         ),
+        "allowlist_mode": attr.bool(doc = "Only download dependencies (including transitive) that were explicitly declared via `artifacts` parameter"),
     },
     environ = [
         "JAVA_HOME",
