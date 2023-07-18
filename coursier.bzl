@@ -901,9 +901,11 @@ def _coursier_fetch_impl(repository_ctx):
         coord = artifact["coord"]
         coord_split = coord.split(":")
         coord_unversioned = ":".join(coord_split[:-1])
+        # This is done because the blocklist doens't specify sources and javadoc jars
+        coord_without_classifier = "%s:%s:%s" % (coord_split[0], coord_split[1], coord_split[-1])
 
         if repository_ctx.attr.allowlist_mode:
-            if not (coord in specified_artifacts or coord_unversioned in specified_unversioned_artifacts):
+            if not (coord_without_classifier in specified_artifacts or coord_unversioned in specified_unversioned_artifacts):
                 block_list.insert(0, artifact_position)
             artifact["dependencies"] = _filter_list_by_allowlist(artifact["dependencies"], specified_artifacts, specified_unversioned_artifacts)
             artifact["directDependencies"] = _filter_list_by_allowlist(artifact["directDependencies"], specified_artifacts, specified_unversioned_artifacts)
