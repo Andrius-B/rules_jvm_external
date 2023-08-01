@@ -885,7 +885,6 @@ def _coursier_fetch_impl(repository_ctx):
         classifier = (":%s" % a["classifier"] if a.get("classifier") != None else "")
         packaging = (":%s" % a["packaging"] if a.get("packaging") != None else "")
         a_coord = a["group"] + ":" + a["artifact"] + packaging + classifier + ":" + a["version"]
-        a_coord_unversioned = ":".join(a_coord.split(":")[:-1])
         specified_artifacts[a_coord] = True
 
     # we want to allow any version of the overriden artifacts:
@@ -896,16 +895,21 @@ def _coursier_fetch_impl(repository_ctx):
         # Some artifacts don't contain files; they are just parent artifacts
         # to other artifacts.
         if artifact["file"] == None:
+            # avoid having useless entries in the lockfile:
+            block_list.insert(0, artifact_position)
             continue
 
         coord = artifact["coord"]
         coord_split = coord.split(":")
         coord_unversioned = ":".join(coord_split[:-1])
+
         # This is done because the blocklist doens't specify sources and javadoc jars
         coord_without_classifier = "%s:%s:%s" % (coord_split[0], coord_split[1], coord_split[-1])
 
         if repository_ctx.attr.allowlist_mode:
-            if not (coord_without_classifier in specified_artifacts or coord_unversioned in specified_unversioned_artifacts):
+            coord_specified_exactly = coord_without_classifier in specified_artifacts
+            coord_specified_versionless = coord_unversioned in specified_unversioned_artifacts
+            if not coord_specified_exactly and not coord_specified_versionless:
                 block_list.insert(0, artifact_position)
             artifact["dependencies"] = _filter_list_by_allowlist(artifact["dependencies"], specified_artifacts, specified_unversioned_artifacts)
             artifact["directDependencies"] = _filter_list_by_allowlist(artifact["directDependencies"], specified_artifacts, specified_unversioned_artifacts)
