@@ -23,6 +23,7 @@ def maven_install(
         use_starlark_android_rules = False,
         aar_import_bzl_label = DEFAULT_AAR_IMPORT_LABEL,
         duplicate_version_warning = "warn",
+        allowlist_mode = False,
         repin_instructions = None,
         ignore_empty_files = False):
     """Resolves and fetches artifacts transitively from Maven repositories.
@@ -123,6 +124,7 @@ def maven_install(
         use_starlark_android_rules = use_starlark_android_rules,
         aar_import_bzl_label = aar_import_bzl_label,
         duplicate_version_warning = duplicate_version_warning,
+        allowlist_mode = allowlist_mode,
         ignore_empty_files = ignore_empty_files,
     )
 
@@ -145,6 +147,7 @@ def maven_install(
             use_credentials_from_home_netrc_file = use_credentials_from_home_netrc_file,
             use_starlark_android_rules = use_starlark_android_rules,
             aar_import_bzl_label = aar_import_bzl_label,
+            allowlist_mode = allowlist_mode,
             repin_instructions = repin_instructions,
             # Extra arguments only used for hash generation
             excluded_artifacts = excluded_artifacts_json_strings,
