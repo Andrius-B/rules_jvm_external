@@ -1181,6 +1181,17 @@ def is_dep(jar_path, deps):
             return True
     return False
 
+def _filter_list_by_allowlist(original, allowlist, unversioned_allowlist):
+    new_list = []
+    for item in original:
+        group, name, _ = item.split(":", 2)
+        if item in allowlist:
+            new_list.append(item)
+        elif (group + ":" + name) in unversioned_allowlist:
+            new_list.append(item)
+
+    return new_list
+
 def remove_prefix(s, prefix):
     if s.startswith(prefix):
         return s[len(prefix):]
@@ -1267,14 +1278,44 @@ def _coursier_fetch_impl(repository_ctx):
         _is_unpinned(repository_ctx),
     ).replace("//", "/")
 
-    for artifact in dep_tree["dependencies"]:
+    # there are four kinds of artifacts in the allow list:
+    # 1. artifact as it is specified in deps
+    # 2. specified artifact with packaging=jar classifier=sources
+    # 3. specified artifact with packaging=jar classifier=javadoc
+    specified_artifacts = {}
+    for a in artifacts:
+        classifier = (":%s" % a["classifier"] if a.get("classifier") != None else "")
+        packaging = (":%s" % a["packaging"] if a.get("packaging") != None else "")
+        exact = a["group"] + ":" + a["artifact"] + packaging + classifier + ":" + a["version"]
+        specified_artifacts[exact] = True
+        sources = a["group"] + ":" + a["artifact"] + ":jar:sources:" + a["version"]
+        specified_artifacts[sources] = True
+        javadoc = a["group"] + ":" + a["artifact"] + ":jar:javadoc:" + a["version"]
+        specified_artifacts[javadoc] = True
+
+    # we want to allow any version of the overriden artifacts:
+    specified_unversioned_artifacts = {}
+    for overriden_unversioned_coord in repository_ctx.attr.override_targets:
+        specified_unversioned_artifacts[overriden_unversioned_coord] = True
+
+    block_list = []
+    for artifact_position, artifact in enumerate(dep_tree["dependencies"]):
         # Some artifacts don't contain files; they are just parent artifacts
         # to other artifacts.
         if artifact["file"] == None:
+            # avoid having useless entries in the lockfile:
+            block_list.insert(0, artifact_position)
             continue
 
-        coord_split = artifact["coord"].split(":")
-        coord_unversioned = "{}:{}".format(coord_split[0], coord_split[1])
+        if repository_ctx.attr.allowlist_mode:
+            coord = artifact["coord"]
+            coord_unversioned = ":".join(coord.split(":")[:-1])
+            coord_specified_exactly = coord in specified_artifacts
+            coord_specified_versionless = coord_unversioned in specified_artifacts
+            if not coord_specified_exactly and not coord_specified_versionless:
+                block_list.insert(0, artifact_position)
+            artifact["dependencies"] = _filter_list_by_allowlist(artifact["dependencies"], specified_artifacts, specified_unversioned_artifacts)
+            artifact["directDependencies"] = _filter_list_by_allowlist(artifact["directDependencies"], specified_artifacts, specified_unversioned_artifacts)
 
         # Normalize paths in place here.
         artifact.update({"file": _normalize_to_unix_path(artifact["file"])})
@@ -1369,6 +1410,9 @@ def _coursier_fetch_impl(repository_ctx):
         artifact.update({"mirror_urls": mirror_urls})
 
         files_to_inspect.append(repository_ctx.path(artifact["file"]))
+
+    for coord_to_block in block_list:
+        dep_tree["dependencies"].pop(coord_to_block)
 
     hasher_stdout = _execute_with_argsfile(
         repository_ctx,
@@ -1637,6 +1681,7 @@ pinned_coursier_fetch = repository_rule(
                 "none",
             ],
         ),
+        "allowlist_mode": attr.bool(doc = "Only download dependencies (including transitive) that were explicitly declared via `artifacts` parameter"),
         "repin_instructions": attr.string(
             doc = "Instructions to re-pin the repository if required. Many people have wrapper scripts for keeping dependencies up to date, and would like to point users to that instead of the default.",
         ),
@@ -1707,6 +1752,7 @@ coursier_fetch = repository_rule(
                 "none",
             ],
         ),
+        "allowlist_mode": attr.bool(doc = "Only download dependencies (including transitive) that were explicitly declared via `artifacts` parameter"),
         "ignore_empty_files": attr.bool(default = False, doc = "Treat jars that are empty as if they were not found."),
         "additional_coursier_options": attr.string_list(doc = "Additional options that will be passed to coursier."),
         "pinned_repo_name": attr.string(

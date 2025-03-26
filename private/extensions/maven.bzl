@@ -121,6 +121,7 @@ install = tag_class(
         "ignore_empty_files": attr.bool(default = False, doc = "Treat jars that are empty as if they were not found."),
         "repin_instructions": attr.string(doc = "Instructions to re-pin the repository if required. Many people have wrapper scripts for keeping dependencies up to date, and would like to point users to that instead of the default. Only honoured for the root module."),
         "additional_coursier_options": attr.string_list(doc = "Additional options that will be passed to coursier."),
+        "allowlist_mode": attr.bool(default = False, doc = "Whether to use allowlist mode for the lock file."),
     },
 )
 
@@ -675,6 +676,7 @@ def maven_impl(mctx):
                 repo["fetch_sources"] = install.fetch_sources
                 repo["resolver"] = install.resolver
                 repo["strict_visibility"] = install.strict_visibility
+                repo["allowlist_mode"] = install.allowlist_mode
                 if len(install.repositories):
                     mapped_repos = []
                     for repository in parse.parse_repository_spec_list(install.repositories):
@@ -741,6 +743,7 @@ def maven_impl(mctx):
                 duplicate_version_warning = repo.get("duplicate_version_warning"),
                 ignore_empty_files = repo.get("ignore_empty_files"),
                 additional_coursier_options = repo.get("additional_coursier_options"),
+                allowlist_mode = repo.get("allowlist_mode"),
             )
         else:
             workspace_prefix = "@@" if bazel_features.external_deps.is_bzlmod_enabled else "@"
